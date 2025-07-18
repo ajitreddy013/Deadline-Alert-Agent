@@ -5,8 +5,13 @@ from email.message import Message
 from datetime import datetime, timedelta
 import re
 
-EMAIL = "ajitreddy013@gmail.com"
-PASSWORD = "bmpo eyak yuyf milx"
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+EMAIL = os.getenv("GMAIL_EMAIL")
+PASSWORD = os.getenv("GMAIL_PASSWORD")
 IMAP_SERVER = "imap.gmail.com"
 
 def clean_subject(subject):

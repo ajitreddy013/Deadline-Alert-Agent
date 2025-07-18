@@ -1,1 +1,82 @@
+# Environment files
 backend/.env
+*.env
+.env
+.env.local
+.env.production
+.env.staging
+
+# Database files
+backend/tasks.db
+data/tasks.db
+*.db
+*.sqlite
+*.sqlite3
+
+# Credentials and keys
+credentials.json
+firebase-adminsdk*.json
+*.p12
+*.pem
+*.key
+
+# macOS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+venv/
+env/
+ENV/
+
+# Flutter
+deadline_alert_app/.dart_tool/
+deadline_alert_app/.flutter-plugins
+deadline_alert_app/.flutter-plugins-dependencies
+deadline_alert_app/.packages
+deadline_alert_app/.pub-cache/
+deadline_alert_app/.pub/
+deadline_alert_app/build/
+deadline_alert_app/ios/Pods/
+deadline_alert_app/ios/.symlinks/
+deadline_alert_app/ios/Flutter/flutter_assets/
+deadline_alert_app/ios/Runner/GeneratedPluginRegistrant.*
+deadline_alert_app/android/.gradle
+deadline_alert_app/android/captures/
+deadline_alert_app/android/gradlew
+deadline_alert_app/android/gradlew.bat
+deadline_alert_app/android/local.properties
+deadline_alert_app/android/app/src/main/java/io/flutter/
+deadline_alert_app/android/app/debug
+deadline_alert_app/android/app/profile
+deadline_alert_app/android/app/release
+
+# Chrome driver and selenium
+selenium-debug.log
+chromedriver.log
+chrome_profile/

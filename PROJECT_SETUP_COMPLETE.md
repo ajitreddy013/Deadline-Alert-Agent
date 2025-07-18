@@ -12,7 +12,7 @@
 - ✅ API documentation at http://localhost:8000/docs
 
 ### **2. Gmail Integration**
-- ✅ Successfully connects to `ajitreddy013@gmail.com`
+- ✅ Successfully connects to your Gmail account
 - ✅ Fetches recent emails and extracts deadlines
 - ✅ Stores deadline tasks in database
 - ✅ API endpoint: `POST /ingest/gmail`
@@ -85,14 +85,14 @@ flutter run
 ## 🔧 **Configuration:**
 
 ### **Gmail Setup:**
-- Email: `ajitreddy013@gmail.com` ✅
+- Email: Configured ✅
 - App Password: Configured ✅
 - IMAP Access: Enabled ✅
 
 ### **Environment Variables:**
 ```bash
-GMAIL_EMAIL=ajitreddy013@gmail.com
-GMAIL_PASSWORD=bmpo eyak yuyf milx
+GMAIL_EMAIL=your-email@gmail.com
+GMAIL_PASSWORD=your-app-password
 FCM_SERVER_KEY=your-fcm-server-key
 ```
 

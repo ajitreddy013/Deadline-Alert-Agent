@@ -1,0 +1,26 @@
+# WhatsApp Integration Commands
+
+## To test WhatsApp QR code scanning:
+
+# Replace "Family" with the exact name of your WhatsApp chat
+curl -X POST "http://localhost:8000/ingest/whatsapp?chat_name=Family"
+
+# Or try with a different chat name:
+curl -X POST "http://localhost:8000/ingest/whatsapp?chat_name=Work Group"
+
+# Or with a friend's name:
+curl -X POST "http://localhost:8000/ingest/whatsapp?chat_name=John Doe"
+
+## What happens:
+1. Chrome browser will open automatically
+2. Navigate to web.whatsapp.com
+3. If not logged in, you'll see a QR code
+4. Scan the QR code with your phone (WhatsApp > Menu > WhatsApp Web)
+5. The system will search for the specified chat
+6. Extract the last 10 messages for deadline detection
+
+## Important Notes:
+- Make sure the backend server is running first
+- Use the EXACT chat name as it appears in WhatsApp
+- The process may take 15-20 seconds to complete
+- Chrome profile will be saved for future use (no need to scan QR again)

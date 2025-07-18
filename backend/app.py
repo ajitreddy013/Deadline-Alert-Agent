@@ -2,15 +2,15 @@ from fastapi import FastAPI, Depends, HTTPException, Body
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import List
-from .database import SessionLocal, engine
-from .models import Task, Base
+from database import SessionLocal, engine
+from models import Task, Base
 import spacy
 import os
-from .gmail_ingest import fetch_recent_emails
-from .whatsapp_ingest import fetch_whatsapp_messages
-from .notify import send_desktop_notification
+from gmail_ingest import fetch_recent_emails
+from whatsapp_ingest import fetch_whatsapp_messages
+from notify import send_desktop_notification
 from sqlalchemy import Column, Integer, String
-from .fcm_notify import send_push_notification
+from fcm_notify import send_push_notification
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -48,7 +48,7 @@ class TaskRead(BaseModel):
     alert_status: str
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 @app.get("/tasks", response_model=List[TaskRead])
 def get_tasks(db: Session = Depends(get_db)):
@@ -167,4 +167,8 @@ def register_token(token: str, db: Session = Depends(get_db)):
 @app.post("/notify/mobile")
 def notify_mobile(token: str, title: str, message: str):
     result = send_push_notification(token, title, message)
-    return {"result": result} 
+    return {"result": result}
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)

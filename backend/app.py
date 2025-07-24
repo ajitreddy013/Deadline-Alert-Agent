@@ -10,14 +10,7 @@ from gmail_ingest import fetch_recent_emails
 from whatsapp_ingest import fetch_whatsapp_messages
 from notify import send_desktop_notification
 from sqlalchemy import Column, Integer, String
-from fcm_notify import send_push_notification
-from dotenv import load_dotenv
-load_dotenv()
-
-class DeviceToken(Base):
-    __tablename__ = "device_tokens"
-    id = Column(Integer, primary_key=True, index=True)
-    token = Column(String, unique=True, nullable=False)
+from onesignal_notify import send_onesignal_notification
 
 Base.metadata.create_all(bind=engine)
 
@@ -33,6 +26,11 @@ def get_db():
         yield db
     finally:
         db.close()
+
+class DeviceToken(Base):
+    __tablename__ = "device_tokens"
+    id = Column(Integer, primary_key=True, index=True)
+    token = Column(String, unique=True, nullable=False)
 
 class TaskCreate(BaseModel):
     summary: str
@@ -154,6 +152,11 @@ def notify_desktop(task_id: int, db: Session = Depends(get_db)):
     )
     return {"status": "notification sent"}
 
+@app.post("/notify/mobile")
+def notify_mobile(player_id: str, title: str, message: str):
+    result = send_onesignal_notification(player_id, title, message)
+    return {"result": result}
+
 @app.post("/register_token")
 def register_token(token: str, db: Session = Depends(get_db)):
     if db.query(DeviceToken).filter(DeviceToken.token == token).first():
@@ -163,11 +166,6 @@ def register_token(token: str, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(db_token)
     return {"status": "registered", "id": db_token.id}
-
-@app.post("/notify/mobile")
-def notify_mobile(token: str, title: str, message: str):
-    result = send_push_notification(token, title, message)
-    return {"result": result}
 
 if __name__ == "__main__":
     import uvicorn

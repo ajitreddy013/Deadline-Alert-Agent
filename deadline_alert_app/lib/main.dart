@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:onesignal_flutter/onesignal_flutter.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  OneSignal.initialize("YOUR_ONESIGNAL_APP_ID"); // Replace with your real OneSignal App ID
   runApp(const DeadlineAlertApp());
 }
 

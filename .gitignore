@@ -80,3 +80,11 @@ deadline_alert_app/android/app/release
 selenium-debug.log
 chromedriver.log
 chrome_profile/
+
+# Personal email configuration files
+backend/email_accounts.json
+backend/.env
+
+# Personal credentials backup
+backend/email_accounts_backup.json
+

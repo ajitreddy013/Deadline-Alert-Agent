@@ -1,0 +1,34 @@
+[
+  {
+    "email": "your-personal1-email@gmail.com",
+    "password": "personal1-app-password",
+    "name": "Personal Account 1",
+    "category": "personal",
+    "priority": "medium",
+    "keywords": ["birthday", "event", "family", "friends", "social", "personal"]
+  },
+  {
+    "email": "your-personal2-email@gmail.com",
+    "password": "personal2-app-password",
+    "name": "Personal Account 2",
+    "category": "personal",
+    "priority": "medium",
+    "keywords": ["shopping", "bills", "subscriptions", "appointments", "personal"]
+  },
+  {
+    "email": "your-placement-email@gmail.com",
+    "password": "placement-app-password",
+    "name": "Placement Account",
+    "category": "placement",
+    "priority": "high",
+    "keywords": ["interview", "application", "deadline", "job", "internship", "placement", "recruiter", "hr", "company", "apply"]
+  },
+  {
+    "email": "your-education-email@gmail.com",
+    "password": "education-app-password",
+    "name": "Education Account",
+    "category": "education",
+    "priority": "high",
+    "keywords": ["assignment", "project", "exam", "submission", "course", "professor", "class", "university", "college", "study"]
+  }
+]

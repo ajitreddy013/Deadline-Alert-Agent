@@ -6,8 +6,19 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await dotenv.load();
-  OneSignal.initialize(dotenv.env['ONESIGNAL_APP_ID']!); // Loaded from .env
+  try {
+    await dotenv.load();
+    // Initialize OneSignal with the app ID from .env file
+    final oneSignalAppId = dotenv.env['ONESIGNAL_APP_ID'];
+    if (oneSignalAppId != null) {
+      OneSignal.initialize(oneSignalAppId);
+    } else {
+      print('Warning: ONESIGNAL_APP_ID not found in .env file');
+    }
+  } catch (e) {
+    print('Error loading .env file: $e');
+    // Continue without OneSignal initialization
+  }
   runApp(const DeadlineAlertApp());
 }
 
@@ -104,4 +115,4 @@ class _TaskListScreenState extends State<TaskListScreen> {
                 ),
     );
   }
-} 
+}

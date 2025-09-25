@@ -1,14 +1,15 @@
 from fastapi import FastAPI, Depends, HTTPException, Body
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
-from typing import List
+from typing import List, Optional
 from database import SessionLocal, engine
-from models import Task, Base
+from models import Task, Base, UserPreferences
 import spacy
 import os
 from gmail_ingest import fetch_recent_emails
 from whatsapp_ingest import fetch_whatsapp_messages
 from notify import send_desktop_notification
+from whatsapp_notify import send_whatsapp_notification, send_deadline_reminder_whatsapp, validate_whatsapp_number
 from sqlalchemy import Column, Integer, String
 from onesignal_notify import send_onesignal_notification
 
@@ -166,6 +167,154 @@ def register_token(token: str, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(db_token)
     return {"status": "registered", "id": db_token.id}
+
+# WhatsApp Notification Endpoints
+class UserPreferencesCreate(BaseModel):
+    email: Optional[str] = None
+    whatsapp_number: Optional[str] = None
+    email_notifications: bool = True
+    whatsapp_notifications: bool = False
+    desktop_notifications: bool = True
+
+class UserPreferencesRead(BaseModel):
+    id: int
+    email: Optional[str] = None
+    whatsapp_number: Optional[str] = None
+    email_notifications: bool
+    whatsapp_notifications: bool
+    desktop_notifications: bool
+
+    class Config:
+        from_attributes = True
+
+@app.post("/user/preferences", response_model=UserPreferencesRead)
+def create_or_update_user_preferences(preferences: UserPreferencesCreate, db: Session = Depends(get_db)):
+    """Create or update user notification preferences"""
+    
+    # Validate WhatsApp number if provided
+    if preferences.whatsapp_number:
+        validated_number = validate_whatsapp_number(preferences.whatsapp_number)
+        if not validated_number:
+            raise HTTPException(status_code=400, detail="Invalid WhatsApp number format. Use international format like +1234567890")
+        preferences.whatsapp_number = validated_number
+    
+    # Check if preferences already exist (assuming one user for now)
+    existing = db.query(UserPreferences).first()
+    
+    if existing:
+        # Update existing preferences
+        for field, value in preferences.model_dump(exclude_unset=True).items():
+            setattr(existing, field, value)
+        db.commit()
+        db.refresh(existing)
+        return existing
+    else:
+        # Create new preferences
+        db_preferences = UserPreferences(**preferences.model_dump())
+        db.add(db_preferences)
+        db.commit()
+        db.refresh(db_preferences)
+        return db_preferences
+
+@app.get("/user/preferences", response_model=UserPreferencesRead)
+def get_user_preferences(db: Session = Depends(get_db)):
+    """Get user notification preferences"""
+    preferences = db.query(UserPreferences).first()
+    if not preferences:
+        # Return default preferences
+        return UserPreferencesRead(
+            id=0,
+            email=None,
+            whatsapp_number=None,
+            email_notifications=True,
+            whatsapp_notifications=False,
+            desktop_notifications=True
+        )
+    return preferences
+
+@app.post("/notify/whatsapp/{task_id}")
+def notify_whatsapp_task(task_id: int, db: Session = Depends(get_db)):
+    """Send WhatsApp notification for a specific task"""
+    task = db.query(Task).filter(Task.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    # Get user preferences
+    preferences = db.query(UserPreferences).first()
+    if not preferences or not preferences.whatsapp_notifications or not preferences.whatsapp_number:
+        raise HTTPException(status_code=400, detail="WhatsApp notifications not configured or disabled")
+    
+    result = send_deadline_reminder_whatsapp(
+        to_number=preferences.whatsapp_number,
+        task_summary=task.summary,
+        deadline=task.deadline or "No deadline specified",
+        source=task.source
+    )
+    
+    if "error" in result:
+        raise HTTPException(status_code=500, detail=f"Failed to send WhatsApp notification: {result['error']}")
+    
+    return {"status": "WhatsApp notification sent", "result": result}
+
+@app.post("/notify/whatsapp")
+def notify_whatsapp_custom(to_number: str, title: str, message: str):
+    """Send custom WhatsApp notification"""
+    validated_number = validate_whatsapp_number(to_number)
+    if not validated_number:
+        raise HTTPException(status_code=400, detail="Invalid WhatsApp number format")
+    
+    result = send_whatsapp_notification(validated_number, title, message)
+    
+    if "error" in result:
+        raise HTTPException(status_code=500, detail=f"Failed to send WhatsApp notification: {result['error']}")
+    
+    return {"status": "WhatsApp notification sent", "result": result}
+
+@app.post("/notify/all/{task_id}")
+def notify_all_channels(task_id: int, db: Session = Depends(get_db)):
+    """Send notifications through all enabled channels for a task"""
+    task = db.query(Task).filter(Task.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    # Get user preferences
+    preferences = db.query(UserPreferences).first()
+    results = {}
+    
+    # Desktop notification
+    if not preferences or preferences.desktop_notifications:
+        try:
+            send_desktop_notification(
+                title=f"Deadline Alert: {task.summary}",
+                message=f"Due: {task.deadline or 'No deadline specified'}\nSource: {task.source}"
+            )
+            results["desktop"] = "sent"
+        except Exception as e:
+            results["desktop"] = f"failed: {str(e)}"
+    
+    # WhatsApp notification
+    if preferences and preferences.whatsapp_notifications and preferences.whatsapp_number:
+        try:
+            whatsapp_result = send_deadline_reminder_whatsapp(
+                to_number=preferences.whatsapp_number,
+                task_summary=task.summary,
+                deadline=task.deadline or "No deadline specified",
+                source=task.source
+            )
+            if "error" in whatsapp_result:
+                results["whatsapp"] = f"failed: {whatsapp_result['error']}"
+            else:
+                results["whatsapp"] = "sent"
+        except Exception as e:
+            results["whatsapp"] = f"failed: {str(e)}"
+    else:
+        results["whatsapp"] = "disabled or not configured"
+    
+    # Update task alert status
+    task.alert_status = "sent"
+    db.commit()
+    
+    return {"status": "notifications processed", "results": results}
 
 if __name__ == "__main__":
     import uvicorn

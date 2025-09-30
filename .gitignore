@@ -55,6 +55,9 @@ env/
 ENV/
 
 # Flutter
+# Ignore generic Dart/Flutter tooling across the repo
+**/.dart_tool/
+
 deadline_alert_app/.dart_tool/
 deadline_alert_app/.flutter-plugins
 deadline_alert_app/.flutter-plugins-dependencies

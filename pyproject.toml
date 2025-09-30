@@ -1,0 +1,22 @@
+[project]
+name = "deadline-reminder"
+version = "0.1.0"
+description = "Local deadline reminder with FastAPI backend, WhatsApp ingestion, and mobile push"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.114",
+  "uvicorn[standard]>=0.30",
+  "sqlalchemy>=2.0",
+  "pydantic>=2.9",
+  "pydantic-settings>=2.4",
+  "dateparser>=1.2",
+  "APScheduler>=3.10",
+  "playwright>=1.47",
+  "pync>=2.0.3",
+  "python-dotenv>=1.0",
+  "requests>=2.32"
+]
+
+[build-system]
+requires = ["setuptools>=68", "wheel>=0.41"]
+build-backend = "setuptools.build_meta"

@@ -129,6 +129,22 @@ flutter run
 ./start_project.sh
 ```
 
+## 💬 WhatsApp Ingestion (via WhatsApp Web)
+
+- First run will open Chrome to https://web.whatsapp.com and may prompt a QR login.
+- The WhatsApp Web session is persisted at: `~/.deadline_reminder/whatsapp_profile` (so you usually won't need to re-scan).
+- Trigger ingestion for a chat by name (make sure the backend is running):
+
+```bash
+# Using curl
+curl -X POST "http://localhost:8000/ingest/whatsapp?chat_name=Family"
+
+# Or via the helper script
+backend/scripts/ingest_whatsapp.sh "Family"
+```
+
+Tip: Keep the WhatsApp Web session alive by staying logged in. Re-scan if necessary.
+
 ## 🔧 Configuration
 
 ### Environment Variables

@@ -3,6 +3,8 @@ import 'package:onesignal_flutter/onesignal_flutter.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'debug/player_id_screen.dart';
+import 'dart:async';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -33,6 +35,9 @@ class DeadlineAlertApp extends StatelessWidget {
         primarySwatch: Colors.blue,
       ),
       home: const TaskListScreen(),
+      routes: {
+        '/debug/player-id': (context) => const PlayerIdScreen(),
+      },
     );
   }
 }
@@ -48,11 +53,14 @@ class _TaskListScreenState extends State<TaskListScreen> {
   List tasks = [];
   bool isLoading = true;
   String error = '';
+  Timer? _pollTimer;
 
   @override
   void initState() {
     super.initState();
     fetchTasks();
+    // Auto-refresh the task list periodically to reflect ingest updates
+    _pollTimer = Timer.periodic(const Duration(seconds: 10), (_) => fetchTasks());
   }
 
   Future<void> fetchTasks() async {
@@ -84,11 +92,22 @@ class _TaskListScreenState extends State<TaskListScreen> {
 
 
   @override
+  void dispose() {
+    _pollTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Your Deadlines'),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.developer_mode),
+            onPressed: () => Navigator.of(context).pushNamed('/debug/player-id'),
+            tooltip: 'Show OneSignal player_id',
+          ),
           IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: fetchTasks,

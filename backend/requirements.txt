@@ -51,3 +51,6 @@ weasel==0.4.1
 wrapt==1.17.2
 twilio==8.10.0
 python-dotenv==1.0.0
+selenium==4.23.1
+webdriver-manager==4.0.2
+dateparser==1.2.0

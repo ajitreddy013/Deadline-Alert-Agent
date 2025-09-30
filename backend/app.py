@@ -12,12 +12,34 @@ from notify import send_desktop_notification
 from whatsapp_notify import send_whatsapp_notification, send_deadline_reminder_whatsapp, validate_whatsapp_number
 from sqlalchemy import Column, Integer, String
 from onesignal_notify import send_onesignal_notification
+from fcm_notify import send_fcm_notification
+from fastapi.middleware.cors import CORSMiddleware
 
 Base.metadata.create_all(bind=engine)
 
 nlp = spacy.load("en_core_web_sm")
 
 app = FastAPI()
+
+# Enable CORS for local development (Flutter web in Chrome)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost",
+        "http://127.0.0.1",
+        "http://localhost:7357",
+        "http://127.0.0.1:7357",
+        "http://localhost:8080",
+        "http://127.0.0.1:8080",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:5000",
+        "http://127.0.0.1:5000",
+    ],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Dependency to get DB session
 
@@ -35,7 +57,7 @@ class DeviceToken(Base):
 
 class TaskCreate(BaseModel):
     summary: str
-    deadline: str = None  # ISO format string
+    deadline: str = None  # ISO format string or natural language
     source: str
     alert_status: str = "pending"
 
@@ -157,6 +179,58 @@ def notify_desktop(task_id: int, db: Session = Depends(get_db)):
 def notify_mobile(player_id: str, title: str, message: str):
     result = send_onesignal_notification(player_id, title, message)
     return {"result": result}
+
+@app.post("/notify/mobile/fcm")
+def notify_mobile_fcm(device_token: str, title: str, message: str):
+    """Send a mobile push using FCM legacy HTTP with a device registration token."""
+    result = send_fcm_notification(device_token, title, message)
+    return {"result": result}
+
+@app.post("/notify/due-soon")
+def notify_due_soon(threshold_minutes: int = 60, db: Session = Depends(get_db)):
+    """Send desktop notifications for tasks due within threshold_minutes.
+    Parses task.deadline (string) using dateparser. Marks alert_status = 'sent' when notified.
+    """
+    now = datetime.now(timezone.utc)
+    sent = []
+    failed = []
+    skipped = []
+
+    tasks = db.query(Task).filter(Task.alert_status == "pending").all()
+    for task in tasks:
+        if not task.deadline:
+            skipped.append(task.id)
+            continue
+        try:
+            parsed = dateparser.parse(
+                task.deadline,
+                settings={
+                    "RETURN_AS_TIMEZONE_AWARE": True,
+                    "PREFER_DATES_FROM": "future",
+                },
+            )
+            if not parsed:
+                skipped.append(task.id)
+                continue
+            # Normalize to UTC
+            due_at = parsed.astimezone(timezone.utc)
+            delta = (due_at - now).total_seconds() / 60.0
+            if 0 <= delta <= float(threshold_minutes):
+                # Send notification
+                try:
+                    send_desktop_notification(
+                        title=f"Deadline soon: {task.summary}",
+                        message=f"Due: {task.deadline or 'unknown'}\nSource: {task.source}"
+                    )
+                    task.alert_status = "sent"
+                    db.commit()
+                    sent.append(task.id)
+                except Exception as e:
+                    failed.append({"id": task.id, "error": str(e)})
+        except Exception as e:
+            failed.append({"id": task.id, "error": str(e)})
+
+    return {"sent": sent, "failed": failed, "skipped": skipped, "threshold_minutes": threshold_minutes}
 
 @app.post("/register_token")
 def register_token(token: str, db: Session = Depends(get_db)):
@@ -318,4 +392,5 @@ def notify_all_channels(task_id: int, db: Session = Depends(get_db)):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    # Bind to loopback for local-only access by default
+    uvicorn.run(app, host="127.0.0.1", port=8000)

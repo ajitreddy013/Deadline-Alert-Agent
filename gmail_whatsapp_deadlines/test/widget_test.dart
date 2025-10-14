@@ -7,14 +7,16 @@
 
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:deadline_alert_app/main.dart';
+import 'package:gmail_whatsapp_deadlines/main.dart';
 
 void main() {
   testWidgets('App loads correctly', (WidgetTester tester) async {
     // Build our app and trigger a frame.
-    await tester.pumpWidget(const DeadlineAlertApp());
+    await tester.pumpWidget(const GmailWhatsAppDeadlinesApp());
 
-    // Verify that our app loads with the correct title
-    expect(find.text('Your Deadlines'), findsOneWidget);
+    // Verify that our app loads with the correct navigation items
+    expect(find.text('Gmail'), findsOneWidget);
+    expect(find.text('WhatsApp'), findsOneWidget);
+    expect(find.text('Settings'), findsOneWidget);
   });
 }

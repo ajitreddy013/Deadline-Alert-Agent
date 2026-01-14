@@ -1,25 +1,83 @@
 from fastapi import FastAPI, Depends, HTTPException, Body
+from contextlib import asynccontextmanager
+from apscheduler.schedulers.background import BackgroundScheduler
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Optional, Dict
 from database import SessionLocal, engine
-from models import Task, Base, UserPreferences
-import spacy
-import os
-from gmail_ingest import fetch_recent_emails
-from whatsapp_ingest import fetch_whatsapp_messages
+from models import Task, Base, UserPreferences, EmailAccount
+from service import ingest_gmail_tasks, ingest_whatsapp_tasks, check_and_notify_due_soon, nlp, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, SCOPES
+from sqlalchemy import Column, Integer, String
+from datetime import datetime, timezone
+from fastapi.middleware.cors import CORSMiddleware
 from notify import send_desktop_notification
 from whatsapp_notify import send_whatsapp_notification, send_deadline_reminder_whatsapp, validate_whatsapp_number
-from sqlalchemy import Column, Integer, String
 from onesignal_notify import send_onesignal_notification
 from fcm_notify import send_fcm_notification
-from fastapi.middleware.cors import CORSMiddleware
+from google_auth_oauthlib.flow import Flow
+from fastapi.responses import RedirectResponse, HTMLResponse
+from urllib.parse import urlencode
+import requests
+import os
 
 Base.metadata.create_all(bind=engine)
 
-nlp = spacy.load("en_core_web_sm")
+def periodic_gmail_ingest():
+    db = SessionLocal()
+    try:
+        print("Running scheduled Gmail ingestion...")
+        ingest_gmail_tasks(db)
+    except Exception as e:
+        print(f"Error in scheduled Gmail ingestion: {e}")
+    finally:
+        db.close()
 
-app = FastAPI()
+def periodic_whatsapp_ingest():
+    db = SessionLocal()
+    try:
+        prefs = db.query(UserPreferences).first()
+        if prefs and prefs.whatsapp_chat_name:
+            print(f"Running scheduled WhatsApp ingestion for chat: {prefs.whatsapp_chat_name}")
+            ingest_whatsapp_tasks(db, prefs.whatsapp_chat_name)
+    except Exception as e:
+        print(f"Error in scheduled WhatsApp ingestion: {e}")
+    finally:
+        db.close()
+
+def periodic_due_soon_check():
+    db = SessionLocal()
+    try:
+        print("Running scheduled due-soon check...")
+        check_and_notify_due_soon(db)
+    except Exception as e:
+        print(f"Error in scheduled due-soon check: {e}")
+    finally:
+        db.close()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Start scheduler
+    scheduler = BackgroundScheduler()
+    
+    # Ingest Gmail every 15 minutes
+    scheduler.add_job(periodic_gmail_ingest, 'interval', minutes=15)
+    
+    # Check for due tasks every 5 minutes
+    scheduler.add_job(periodic_due_soon_check, 'interval', minutes=5)
+    
+    # Ingest WhatsApp every 30 minutes (if configured)
+    scheduler.add_job(periodic_whatsapp_ingest, 'interval', minutes=30)
+    
+    scheduler.start()
+    print("Background scheduler started.")
+    
+    yield
+    
+    # Shutdown scheduler
+    scheduler.shutdown()
+    print("Background scheduler shut down.")
+
+app = FastAPI(lifespan=lifespan)
 
 # Enable CORS for local development (Flutter web in Chrome)
 app.add_middleware(
@@ -54,6 +112,27 @@ class DeviceToken(Base):
     __tablename__ = "device_tokens"
     id = Column(Integer, primary_key=True, index=True)
     token = Column(String, unique=True, nullable=False)
+
+class EmailAccountRead(BaseModel):
+    id: int
+    email: str
+    account_name: Optional[str]
+    category: str
+    is_active: bool
+    last_sync: Optional[datetime]
+
+    class Config:
+        from_attributes = True
+
+class EmailAccountUpdate(BaseModel):
+    account_name: Optional[str] = None
+    category: Optional[str] = None
+    is_active: Optional[bool] = None
+
+class TokenExchangeRequest(BaseModel):
+    code: str
+    email: str
+    account_name: Optional[str] = "Personal"
 
 class TaskCreate(BaseModel):
     summary: str
@@ -116,52 +195,12 @@ def extract_deadline(message: str = Body(..., embed=True)):
 
 @app.post("/ingest/gmail")
 def ingest_gmail(db: Session = Depends(get_db)):
-    emails = fetch_recent_emails()
-    results = []
-    for email_obj in emails:
-        message = f"{email_obj['subject']}\n{email_obj['body']}"
-        doc = nlp(message)
-        dates = [ent.text for ent in doc.ents if ent.label_ in ["DATE", "TIME"]]
-        if dates:
-            db_task = Task(
-                summary=email_obj['subject'],
-                deadline=dates[0],
-                source="gmail",
-                alert_status="pending"
-            )
-            db.add(db_task)
-            db.commit()
-            db.refresh(db_task)
-            results.append({
-                "subject": email_obj['subject'],
-                "deadline": dates[0],
-                "task_id": db_task.id
-            })
+    results = ingest_gmail_tasks(db)
     return {"ingested": results}
 
 @app.post("/ingest/whatsapp")
 def ingest_whatsapp(chat_name: str, db: Session = Depends(get_db)):
-    messages = fetch_whatsapp_messages(chat_name)
-    results = []
-    for msg_obj in messages:
-        message = msg_obj["text"]
-        doc = nlp(message)
-        dates = [ent.text for ent in doc.ents if ent.label_ in ["DATE", "TIME"]]
-        if dates:
-            db_task = Task(
-                summary=message[:100],
-                deadline=dates[0],
-                source="whatsapp",
-                alert_status="pending"
-            )
-            db.add(db_task)
-            db.commit()
-            db.refresh(db_task)
-            results.append({
-                "message": message,
-                "deadline": dates[0],
-                "task_id": db_task.id
-            })
+    results = ingest_whatsapp_tasks(db, chat_name)
     return {"ingested": results}
 
 @app.post("/notify/desktop/{task_id}")
@@ -188,59 +227,150 @@ def notify_mobile_fcm(device_token: str, title: str, message: str):
 
 @app.post("/notify/due-soon")
 def notify_due_soon(threshold_minutes: int = 60, db: Session = Depends(get_db)):
-    """Send desktop notifications for tasks due within threshold_minutes.
-    Parses task.deadline (string) using dateparser. Marks alert_status = 'sent' when notified.
-    """
-    now = datetime.now(timezone.utc)
-    sent = []
-    failed = []
-    skipped = []
+    sent = check_and_notify_due_soon(db, threshold_minutes)
+    return {"sent": sent, "threshold_minutes": threshold_minutes}
 
-    tasks = db.query(Task).filter(Task.alert_status == "pending").all()
-    for task in tasks:
-        if not task.deadline:
-            skipped.append(task.id)
-            continue
-        try:
-            parsed = dateparser.parse(
-                task.deadline,
-                settings={
-                    "RETURN_AS_TIMEZONE_AWARE": True,
-                    "PREFER_DATES_FROM": "future",
-                },
+# --- Google OAuth Endpoints ---
+
+@app.get("/auth/google/login")
+async def google_login():
+    """Initial OAuth step: Redirect user to Google's consent screen."""
+    print(f"DEBUG: Starting login with Client ID: {GOOGLE_CLIENT_ID[:10]}...")
+    if not GOOGLE_CLIENT_ID:
+        raise HTTPException(status_code=500, detail="GOOGLE_CLIENT_ID not configured")
+    
+    # We use offline access to get a refresh token
+    params = {
+        "client_id": GOOGLE_CLIENT_ID,
+        "redirect_uri": "http://localhost:8000/auth/google/callback",
+        "response_type": "code",
+        "scope": "openid email profile https://www.googleapis.com/auth/gmail.readonly",
+        "access_type": "offline",
+        "prompt": "consent",
+    }
+    url = f"https://accounts.google.com/o/oauth2/v2/auth?{urlencode(params)}"
+    return RedirectResponse(url)
+
+@app.get("/auth/google/callback")
+async def google_callback(code: str, db: Session = Depends(get_db)):
+    """Second OAuth step: Google redirects here with a code."""
+    try:
+        # 1. Prepare the flow to exchange the code
+        flow = Flow.from_client_config(
+            {
+                "web": {
+                    "client_id": GOOGLE_CLIENT_ID,
+                    "client_secret": GOOGLE_CLIENT_SECRET,
+                    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                    "token_uri": "https://oauth2.googleapis.com/token",
+                }
+            },
+            # Match the scopes used in /login exactly
+            scopes=["openid", "email", "profile", "https://www.googleapis.com/auth/gmail.readonly"],
+            redirect_uri="http://localhost:8000/auth/google/callback"
+        )
+        
+        # 2. Exchange code for token
+        flow.fetch_token(code=code)
+        creds = flow.credentials
+        
+        # 3. Get user info
+        user_info_url = "https://www.googleapis.com/oauth2/v3/userinfo"
+        headers = {"Authorization": f"Bearer {creds.token}"}
+        user_info_resp = requests.get(user_info_url, headers=headers)
+        user_info = user_info_resp.json()
+        
+        email = user_info.get("email")
+        name = user_info.get("name", "Personal")
+
+        # 4. Store in database
+        account = db.query(EmailAccount).filter(EmailAccount.email == email).first()
+        if account:
+            account.refresh_token = creds.refresh_token or account.refresh_token
+            account.is_active = True
+        else:
+            account = EmailAccount(
+                email=email,
+                refresh_token=creds.refresh_token,
+                account_name=name,
+                category="gmail_oauth"
             )
-            if not parsed:
-                skipped.append(task.id)
-                continue
-            # Normalize to UTC
-            due_at = parsed.astimezone(timezone.utc)
-            delta = (due_at - now).total_seconds() / 60.0
-            if 0 <= delta <= float(threshold_minutes):
-                # Send notification
-                try:
-                    send_desktop_notification(
-                        title=f"Deadline soon: {task.summary}",
-                        message=f"Due: {task.deadline or 'unknown'}\nSource: {task.source}"
-                    )
-                    task.alert_status = "sent"
-                    db.commit()
-                    sent.append(task.id)
-                except Exception as e:
-                    failed.append({"id": task.id, "error": str(e)})
-        except Exception as e:
-            failed.append({"id": task.id, "error": str(e)})
+            db.add(account)
+        
+        db.commit()
+        
+        # 5. Return success HTML
+        return HTMLResponse(content=f"""
+            <html>
+                <body style="font-family: sans-serif; text-align: center; padding-top: 100px; background-color: #f4f4f9;">
+                    <div style="display: inline-block; padding: 40px; background: white; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1);">
+                        <h1 style="color: #4CAF50;">Successfully Connected!</h1>
+                        <p style="font-size: 1.2em; color: #555;">Account: <strong>{email}</strong></p>
+                        <p>You can now close this window and refresh your app settings.</p>
+                        <button onclick="window.close()" style="margin-top: 20px; padding: 10px 20px; background: #2196F3; color: white; border: none; border-radius: 5px; cursor: pointer;">Close Window</button>
+                    </div>
+                </body>
+            </html>
+        """)
+    except Exception as e:
+        return HTMLResponse(content=f"<h1>Connection Error</h1><p>{str(e)}</p>", status_code=500)
 
-    return {"sent": sent, "failed": failed, "skipped": skipped, "threshold_minutes": threshold_minutes}
+@app.post("/auth/google/exchange")
+def exchange_google_code(req: TokenExchangeRequest, db: Session = Depends(get_db)):
+    """Exchange auth code for refresh token and store it"""
+    try:
+        # Note: In a real production app, the redirect_uri must match what was registered
+        # and what the Flutter app used. For Flutter Web/Mobile, 'postmessage' or a custom scheme is common.
+        flow = Flow.from_client_config(
+            {
+                "web": {
+                    "client_id": GOOGLE_CLIENT_ID,
+                    "client_secret": GOOGLE_CLIENT_SECRET,
+                    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                    "token_uri": "https://oauth2.googleapis.com/token",
+                }
+            },
+            scopes=SCOPES,
+            redirect_uri='postmessage' # Standard for server-side exchange from mobile/web
+        )
+        
+        flow.fetch_token(code=req.code)
+        creds = flow.credentials
+        
+        if not creds.refresh_token:
+            # If no refresh token, we might need to prompt for 'offline' access again
+            return {"error": "No refresh token received. Ensure access_type='offline' and prompt='consent'"}
 
-@app.post("/register_token")
-def register_token(token: str, db: Session = Depends(get_db)):
-    if db.query(DeviceToken).filter(DeviceToken.token == token).first():
-        return {"status": "already registered"}
-    db_token = DeviceToken(token=token)
-    db.add(db_token)
+        # Check if already exists
+        account = db.query(EmailAccount).filter(EmailAccount.email == req.email).first()
+        if account:
+            account.refresh_token = creds.refresh_token
+        else:
+            account = EmailAccount(
+                email=req.email,
+                account_name=req.account_name,
+                refresh_token=creds.refresh_token
+            )
+            db.add(account)
+        
+        db.commit()
+        return {"status": "success", "email": req.email}
+        
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.get("/accounts", response_model=List[EmailAccountRead])
+def list_accounts(db: Session = Depends(get_db)):
+    return db.query(EmailAccount).all()
+
+@app.delete("/accounts/{account_id}")
+def delete_account(account_id: int, db: Session = Depends(get_db)):
+    account = db.query(EmailAccount).filter(EmailAccount.id == account_id).first()
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+    db.delete(account)
     db.commit()
-    db.refresh(db_token)
-    return {"status": "registered", "id": db_token.id}
+    return {"status": "deleted"}
 
 # WhatsApp Notification Endpoints
 class UserPreferencesCreate(BaseModel):
@@ -249,6 +379,7 @@ class UserPreferencesCreate(BaseModel):
     email_notifications: bool = True
     whatsapp_notifications: bool = False
     desktop_notifications: bool = True
+    whatsapp_chat_name: Optional[str] = None
 
 class UserPreferencesRead(BaseModel):
     id: int
@@ -257,6 +388,7 @@ class UserPreferencesRead(BaseModel):
     email_notifications: bool
     whatsapp_notifications: bool
     desktop_notifications: bool
+    whatsapp_chat_name: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -302,7 +434,8 @@ def get_user_preferences(db: Session = Depends(get_db)):
             whatsapp_number=None,
             email_notifications=True,
             whatsapp_notifications=False,
-            desktop_notifications=True
+            desktop_notifications=True,
+            whatsapp_chat_name=None
         )
     return preferences
 

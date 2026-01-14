@@ -19,3 +19,14 @@ class UserPreferences(Base):
     email_notifications = Column(Boolean, default=True)
     whatsapp_notifications = Column(Boolean, default=False)
     desktop_notifications = Column(Boolean, default=True)
+    whatsapp_chat_name = Column(String, nullable=True)
+
+class EmailAccount(Base):
+    __tablename__ = "email_accounts"
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String, unique=True, nullable=False)
+    account_name = Column(String, nullable=True)
+    category = Column(String, default="general") # personal, education, work, placement
+    refresh_token = Column(String, nullable=False)
+    is_active = Column(Boolean, default=True)
+    last_sync = Column(DateTime, nullable=True)

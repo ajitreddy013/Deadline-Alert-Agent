@@ -54,3 +54,7 @@ python-dotenv==1.0.0
 selenium==4.23.1
 webdriver-manager==4.0.2
 dateparser==1.2.0
+apscheduler==3.10.4
+google-api-python-client==2.158.0
+google-auth-oauthlib==1.2.1
+google-auth-httplib2==0.2.0

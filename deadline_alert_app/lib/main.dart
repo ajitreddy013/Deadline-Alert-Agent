@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'debug/player_id_screen.dart';
+import 'settings_screen.dart';
 import 'dart:async';
 
 void main() async {
@@ -37,6 +38,7 @@ class DeadlineAlertApp extends StatelessWidget {
       home: const TaskListScreen(),
       routes: {
         '/debug/player-id': (context) => const PlayerIdScreen(),
+        '/settings': (context) => const SettingsScreen(),
       },
     );
   }
@@ -103,6 +105,11 @@ class _TaskListScreenState extends State<TaskListScreen> {
       appBar: AppBar(
         title: const Text('Your Deadlines'),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.settings),
+            onPressed: () => Navigator.of(context).pushNamed('/settings'),
+            tooltip: 'Settings & Accounts',
+          ),
           IconButton(
             icon: const Icon(Icons.developer_mode),
             onPressed: () => Navigator.of(context).pushNamed('/debug/player-id'),

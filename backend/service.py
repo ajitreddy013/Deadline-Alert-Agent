@@ -6,7 +6,6 @@ from notify import send_desktop_notification
 from whatsapp_notify import send_deadline_reminder_whatsapp
 import dateparser
 from datetime import datetime, timezone
-import spacy
 import os
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
@@ -14,8 +13,8 @@ from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 import base64
 
-# Load spaCy model once
-nlp = spacy.load("en_core_web_sm")
+# Use LLM provider instead of spacy for deadline extraction
+from llm_deadline_extractor import extract_deadlines_with_llm
 
 GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID")
 GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET")
@@ -38,10 +37,7 @@ def get_gmail_service(email_account: EmailAccount):
     return build('gmail', 'v1', credentials=creds)
 
 def fetch_gmail_deadlines_oauth(service, email_address: str, category: str = "general"):
-    """Fetch and process emails using Google Gmail API"""
-    # Search for emails in the last 3 days with deadline-related keywords
-    # This is a simplified version of what we had in gmail_ingest.py
-    # but using the official Google API for better reliability.
+    """Fetch and process emails using Google Gmail API with LLM extraction"""
     query = 'newer_than:3d (deadline OR assignment OR meeting OR submit OR register)'
     results = service.users().messages().list(userId='me', q=query).execute()
     messages = results.get('messages', [])
@@ -56,15 +52,15 @@ def fetch_gmail_deadlines_oauth(service, email_address: str, category: str = "ge
         # Get snippet or body
         snippet = msg_data.get('snippet', "")
         
-        # NLP Processing
+        # Use LLM for intelligent deadline extraction
         message_text = f"{subject}\n{snippet}"
-        doc = nlp(message_text)
-        dates = [ent.text for ent in doc.ents if ent.label_ in ["DATE", "TIME"]]
+        deadlines = extract_deadlines_with_llm(message_text)
         
-        if dates:
+        # Add each extracted deadline as a task
+        for deadline_info in deadlines:
             extracted_tasks.append({
-                "summary": subject,
-                "deadline": dates[0],
+                "summary": deadline_info.get("task", subject),
+                "deadline": f"{deadline_info.get('date', '')} {deadline_info.get('time', '')}".strip(),
                 "account": email_address,
                 "category": category
             })
@@ -122,18 +118,20 @@ def ingest_whatsapp_tasks(db: Session, chat_name: str):
     results = []
     for msg_obj in messages:
         message = msg_obj["text"]
-        doc = nlp(message)
-        dates = [ent.text for ent in doc.ents if ent.label_ in ["DATE", "TIME"]]
-        if dates:
+        
+        # Use LLM for deadline extraction
+        deadlines = extract_deadlines_with_llm(message)
+        
+        for deadline_info in deadlines:
             # Check if task already exists
-            short_msg = message[:100]
-            existing = db.query(Task).filter(Task.summary == short_msg, Task.source == "whatsapp").first()
+            task_summary = deadline_info.get("task", message[:100])
+            existing = db.query(Task).filter(Task.summary == task_summary, Task.source == "whatsapp").first()
             if existing:
                 continue
                 
             db_task = Task(
-                summary=short_msg,
-                deadline=dates[0],
+                summary=task_summary,
+                deadline=f"{deadline_info.get('date', '')} {deadline_info.get('time', '')}".strip(),
                 source="whatsapp",
                 alert_status="pending"
             )
@@ -142,7 +140,7 @@ def ingest_whatsapp_tasks(db: Session, chat_name: str):
             db.refresh(db_task)
             results.append({
                 "message": message,
-                "deadline": dates[0],
+                "deadline": db_task.deadline,
                 "task_id": db_task.id
             })
     return results

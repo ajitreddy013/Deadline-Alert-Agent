@@ -32,7 +32,7 @@ class DeadlineAlertApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Deadline Alert App',
+      title: 'DeadlineAI',
       theme: ThemeData(
         primarySwatch: Colors.blue,
       ),
@@ -106,7 +106,7 @@ class _TaskListScreenState extends State<TaskListScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Your Deadlines'),
+        title: const Text('DeadlineAI'),
         actions: [
           IconButton(
             icon: const Icon(Icons.settings),

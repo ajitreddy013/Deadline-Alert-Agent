@@ -1,6 +1,5 @@
 from sqlalchemy.orm import Session
 from models import Task, UserPreferences, EmailAccount
-from gmail_ingest import fetch_recent_emails
 from whatsapp_ingest import fetch_whatsapp_messages
 from notify import send_desktop_notification
 from whatsapp_notify import send_deadline_reminder_whatsapp

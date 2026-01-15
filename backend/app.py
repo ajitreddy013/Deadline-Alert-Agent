@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from typing import List, Optional, Dict
 from database import SessionLocal, engine
 from models import Task, Base, UserPreferences, EmailAccount
-from service import ingest_gmail_tasks, ingest_whatsapp_tasks, check_and_notify_due_soon, nlp, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, SCOPES
+from service import ingest_gmail_tasks, ingest_whatsapp_tasks, check_and_notify_due_soon, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, SCOPES
 from sqlalchemy import Column, Integer, String
 from datetime import datetime, timezone
 from fastapi.middleware.cors import CORSMiddleware
@@ -17,6 +17,7 @@ from fcm_notify import send_fcm_notification
 from google_auth_oauthlib.flow import Flow
 from fastapi.responses import RedirectResponse, HTMLResponse
 from urllib.parse import urlencode
+from chat_handler import chat_with_deadlines, get_llm_status
 import requests
 import os
 
@@ -169,28 +170,19 @@ def create_task(task: TaskCreate, db: Session = Depends(get_db)):
 
 @app.post("/extract_deadline")
 def extract_deadline(message: str = Body(..., embed=True)):
-    doc = nlp(message)
-    dates = []
-    tasks = []
-    hackathons = []
-    # Extract date/time entities
-    for ent in doc.ents:
-        if ent.label_ in ["DATE", "TIME"]:
-            dates.append(ent.text)
-    # Simple keyword-based extraction for tasks/hackathons
-    task_keywords = ["assignment", "meeting", "test", "task", "reminder"]
-    hackathon_keywords = ["hackathon", "register", "submit", "deadline"]
-    lower_msg = message.lower()
-    for word in task_keywords:
-        if word in lower_msg:
-            tasks.append(word)
-    for word in hackathon_keywords:
-        if word in lower_msg:
-            hackathons.append(word)
+    """Extract deadlines using LLM provider"""
+    from llm_deadline_extractor import extract_deadlines_with_llm
+    
+    deadlines = extract_deadlines_with_llm(message)
+    
+    # Format response to match legacy format
+    dates = [d.get('date', '') for d in deadlines]
+    tasks = [d.get('task', '') for d in deadlines]
+    
     return {
-        "dates": dates,
-        "tasks": tasks,
-        "hackathons": hackathons
+        "deadlines": deadlines,  # Full structured data
+        "dates": dates,  # Legacy format
+        "tasks": tasks,  # Legacy format
     }
 
 @app.post("/ingest/gmail")
@@ -522,6 +514,19 @@ def notify_all_channels(task_id: int, db: Session = Depends(get_db)):
     db.commit()
     
     return {"status": "notifications processed", "results": results}
+
+# LLM Endpoints
+@app.get("/llm/status")
+def llm_status():
+    """Check which LLM providers are available and get suggested questions"""
+    return get_llm_status()
+
+@app.post("/chat")
+def chat_endpoint(question: str, db: Session = Depends(get_db)):
+    """Chat with your deadlines using LLM"""
+    tasks = db.query(Task).all()
+    response = chat_with_deadlines(question, tasks)
+    return response
 
 if __name__ == "__main__":
     import uvicorn

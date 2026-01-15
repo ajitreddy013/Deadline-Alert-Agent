@@ -21,6 +21,9 @@ from chat_handler import chat_with_deadlines, get_llm_status
 import requests
 import os
 
+# Relax scope matching for Google OAuth normalization
+os.environ['OAUTHLIB_RELAX_TOKEN_SCOPE'] = '1'
+
 Base.metadata.create_all(bind=engine)
 
 def periodic_gmail_ingest():
@@ -236,12 +239,20 @@ async def google_login():
     if not GOOGLE_CLIENT_ID:
         raise HTTPException(status_code=500, detail="GOOGLE_CLIENT_ID not configured in environment variables")
     
+    # Updated to full scope URLs to prevent mismatch errors
+    full_scopes = [
+        "openid",
+        "https://www.googleapis.com/auth/userinfo.email",
+        "https://www.googleapis.com/auth/userinfo.profile",
+        "https://www.googleapis.com/auth/gmail.readonly"
+    ]
+    
     # We use offline access to get a refresh token
     params = {
         "client_id": GOOGLE_CLIENT_ID,
         "redirect_uri": redirect_uri,
         "response_type": "code",
-        "scope": "openid email profile https://www.googleapis.com/auth/gmail.readonly",
+        "scope": " ".join(full_scopes),
         "access_type": "offline",
         "prompt": "consent",
     }
@@ -255,7 +266,14 @@ async def google_callback(code: str, db: Session = Depends(get_db)):
     redirect_uri = f"{backend_url.rstrip('/')}/auth/google/callback"
     
     try:
-        # 1. Prepare the flow to exchange the code
+        # Prepare the flow to exchange the code
+        full_scopes = [
+            "openid",
+            "https://www.googleapis.com/auth/userinfo.email",
+            "https://www.googleapis.com/auth/userinfo.profile",
+            "https://www.googleapis.com/auth/gmail.readonly"
+        ]
+        
         flow = Flow.from_client_config(
             {
                 "web": {
@@ -265,8 +283,7 @@ async def google_callback(code: str, db: Session = Depends(get_db)):
                     "token_uri": "https://oauth2.googleapis.com/token",
                 }
             },
-            # Match the scopes used in /login exactly
-            scopes=["openid", "email", "profile", "https://www.googleapis.com/auth/gmail.readonly"],
+            scopes=full_scopes,
             redirect_uri=redirect_uri
         )
         

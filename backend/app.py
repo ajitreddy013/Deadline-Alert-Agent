@@ -188,10 +188,22 @@ def extract_deadline(message: str = Body(..., embed=True)):
         "tasks": tasks,  # Legacy format
     }
 
-@app.post("/ingest/gmail")
-def ingest_gmail(db: Session = Depends(get_db)):
-    results = ingest_gmail_tasks(db)
-    return {"ingested": results}
+@app.get("/sync")
+def manual_sync(db: Session = Depends(get_db)):
+    """Manually trigger ingestion for Gmail and WhatsApp"""
+    print("Manual sync triggered...")
+    gmail_results = ingest_gmail_tasks(db)
+    whatsapp_results = []
+    
+    prefs = db.query(UserPreferences).first()
+    if prefs and prefs.whatsapp_chat_name:
+        whatsapp_results = ingest_whatsapp_tasks(db, prefs.whatsapp_chat_name)
+        
+    return {
+        "gmail": gmail_results,
+        "whatsapp": whatsapp_results,
+        "status": "Sync complete"
+    }
 
 @app.post("/ingest/whatsapp")
 def ingest_whatsapp(chat_name: str, db: Session = Depends(get_db)):

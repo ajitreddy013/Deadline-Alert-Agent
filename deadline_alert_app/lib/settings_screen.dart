@@ -1,13 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:google_sign_in/google_sign_in.dart';
-import 'package:google_sign_in_platform_interface/google_sign_in_platform_interface.dart';
-import 'package:google_sign_in_web/google_sign_in_web.dart' as web_plugin;
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
-// ignore: avoid_web_libraries_in_flutter
-import 'dart:html' as html;
+import 'package:url_launcher/url_launcher.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -69,7 +66,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     print("DEBUG: Sending code to backend for ${user.email}...");
     try {
       final response = await http.post(
-        Uri.parse('http://localhost:8000/auth/google/exchange'),
+        Uri.parse('https://deadline-alert-agent-production.up.railway.app/auth/google/exchange'),
         headers: {'Content-Type': 'application/json'},
         body: json.encode({
           'code': user.serverAuthCode,
@@ -96,7 +93,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> fetchAccounts() async {
     setState(() => isLoading = true);
     try {
-      final response = await http.get(Uri.parse('http://localhost:8000/accounts'));
+      final response = await http.get(Uri.parse('https://deadline-alert-agent-production.up.railway.app/accounts'));
       if (response.statusCode == 200) {
         setState(() {
           accounts = json.decode(response.body);
@@ -142,7 +139,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _deleteAccount(int id) async {
     try {
-      final response = await http.delete(Uri.parse('http://localhost:8000/accounts/$id'));
+      final response = await http.delete(Uri.parse('https://deadline-alert-agent-production.up.railway.app/accounts/$id'));
       if (response.statusCode == 200) {
         fetchAccounts();
       }
@@ -205,22 +202,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     const SizedBox(height: 24),
                     const Text("Reliable Connection (Recommended for Web)"),
                     const SizedBox(height: 8),
-                    // Only render if init has started to avoid Bad State
-                    if (_isInitStarted)
-                      SizedBox(
-                        height: 50,
-                        child: (GoogleSignInPlatform.instance as web_plugin.GoogleSignInPlugin).renderButton(),
-                      )
-                    else
-                      const CircularProgressIndicator(),
+                    const Text("Use the 'Connect via Browser' button below if standard login fails."),
                   ],
                   const SizedBox(height: 24),
-                  const Text("Option 3: Rock-Solid Connection (External Window)"),
+                  const Text("Rock-Solid Connection (External Window)"),
                   const SizedBox(height: 8),
                   ElevatedButton.icon(
-                    onPressed: () {
-                      if (kIsWeb) {
-                        html.window.open('http://localhost:8000/auth/google/login', 'Connect Google');
+                    onPressed: () async {
+                      final url = Uri.parse('https://deadline-alert-agent-production.up.railway.app/auth/google/login');
+                      try {
+                        await launchUrl(url, mode: LaunchMode.externalApplication);
+                      } catch (e) {
+                        debugPrint('Could not launch $url: $e');
                       }
                     },
                     style: ElevatedButton.styleFrom(backgroundColor: Colors.orange[100], foregroundColor: Colors.orange[900]),

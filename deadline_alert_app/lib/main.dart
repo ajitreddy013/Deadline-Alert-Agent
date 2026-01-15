@@ -73,7 +73,7 @@ class _TaskListScreenState extends State<TaskListScreen> {
     });
     try {
       // Change the URL to your backend's address if needed
-      final response = await http.get(Uri.parse('http://localhost:8000/tasks'));
+      final response = await http.get(Uri.parse('https://deadline-alert-agent-production.up.railway.app/tasks'));
       if (response.statusCode == 200) {
         setState(() {
           tasks = json.decode(response.body);
@@ -119,6 +119,33 @@ class _TaskListScreenState extends State<TaskListScreen> {
           IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: fetchTasks,
+            tooltip: 'Refresh List',
+          ),
+          IconButton(
+            icon: const Icon(Icons.sync),
+            onPressed: () async {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Starting sync... Please wait.')),
+              );
+              try {
+                final response = await http.get(Uri.parse('https://deadline-alert-agent-production.up.railway.app/sync'));
+                if (response.statusCode == 200) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Sync complete! Fetching new tasks...')),
+                  );
+                  fetchTasks();
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Sync failed: ${response.statusCode}')),
+                  );
+                }
+              } catch (e) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Sync error: $e')),
+                );
+              }
+            },
+            tooltip: 'Sync with Gmail',
           ),
         ],
       ),
@@ -147,8 +174,12 @@ class _TaskListScreenState extends State<TaskListScreen> {
           // Chat overlay popup
           if (_showChatOverlay)
             Positioned(
-              right: 20,
-              bottom: 80,
+              left: 10,
+              right: 10,
+              // Adjust bottom position based on keyboard height
+              bottom: MediaQuery.of(context).viewInsets.bottom > 0 
+                  ? MediaQuery.of(context).viewInsets.bottom + 10 
+                  : 90,
               child: ChatOverlayWidget(
                 onClose: () => setState(() => _showChatOverlay = false),
               ),
@@ -219,7 +250,7 @@ class _ChatOverlayWidgetState extends State<ChatOverlayWidget> {
 
     try {
       final response = await http.post(
-        Uri.parse('http://localhost:8000/chat?question=${Uri.encodeComponent(text)}'),
+        Uri.parse('https://deadline-alert-agent-production.up.railway.app/chat?question=${Uri.encodeComponent(text)}'),
       );
 
       if (response.statusCode == 200) {
@@ -266,9 +297,20 @@ class _ChatOverlayWidgetState extends State<ChatOverlayWidget> {
 
   @override
   Widget build(BuildContext context) {
+    final screenSize = MediaQuery.of(context).size;
+    final keyboardHeight = MediaQuery.of(context).viewInsets.bottom;
+    
+    // Calculate responsive width (max 400 for larger screens)
+    final double overlayWidth = screenSize.width > 450 ? 400 : (screenSize.width - 20);
+    
+    // Calculate responsive height (make it even smaller to ensure it stays on screen)
+    final double overlayHeight = keyboardHeight > 0 
+        ? (screenSize.height * 0.3) 
+        : (screenSize.height * 0.4);
+
     return Container(
-      width: 380,
-      height: 500,
+      width: overlayWidth,
+      height: overlayHeight,
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),

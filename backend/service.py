@@ -37,7 +37,9 @@ def get_gmail_service(email_account: EmailAccount):
 
 def fetch_gmail_deadlines_oauth(service, email_address: str, category: str = "general"):
     """Fetch and process emails using Google Gmail API with LLM extraction"""
-    query = 'newer_than:3d (deadline OR assignment OR meeting OR submit OR register)'
+    # Expanded query to capture more deadlines (last 7 days)
+    query = 'newer_than:7d (deadline OR assignment OR meeting OR submit OR register OR project)'
+    print(f"DEBUG: Gmail Query: {query}")
     results = service.users().messages().list(userId='me', q=query).execute()
     messages = results.get('messages', [])
     
@@ -98,7 +100,9 @@ def ingest_all_gmail_accounts(db: Session):
             db.commit()
             
         except Exception as e:
-            print(f"Failed to sync {account.email}: {e}")
+            error_msg = f"Failed to sync {account.email}: {str(e)}"
+            print(error_msg)
+            total_ingested.append({"error": error_msg, "email": account.email})
             
     return total_ingested
 

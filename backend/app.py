@@ -271,13 +271,24 @@ async def google_callback(code: str, db: Session = Depends(get_db)):
         )
         
         # 2. Exchange code for token
-        flow.fetch_token(code=code)
+        try:
+            flow.fetch_token(code=code)
+        except Exception as e:
+            print(f"ERROR: fetch_token failed: {str(e)}")
+            # If it's a context manager error or similar, log more details
+            raise HTTPException(status_code=401, detail=f"Google Token Exchange Failed: {str(e)}")
+            
         creds = flow.credentials
         
         # 3. Get user info
         user_info_url = "https://www.googleapis.com/oauth2/v3/userinfo"
         headers = {"Authorization": f"Bearer {creds.token}"}
         user_info_resp = requests.get(user_info_url, headers=headers)
+        
+        if user_info_resp.status_code != 200:
+            print(f"ERROR: userinfo failed: {user_info_resp.status_code} - {user_info_resp.text}")
+            raise HTTPException(status_code=401, detail="Failed to get user info from Google")
+            
         user_info = user_info_resp.json()
         
         email = user_info.get("email")

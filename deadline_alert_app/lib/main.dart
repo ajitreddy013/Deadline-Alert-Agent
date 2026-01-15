@@ -5,7 +5,6 @@ import 'dart:convert';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'debug/player_id_screen.dart';
 import 'settings_screen.dart';
-import 'chat_screen.dart';
 import 'dart:async';
 
 void main() async {
@@ -40,7 +39,6 @@ class DeadlineAlertApp extends StatelessWidget {
       routes: {
         '/debug/player-id': (context) => const PlayerIdScreen(),
         '/settings': (context) => const SettingsScreen(),
-        '/chat': (context) => const ChatScreen(),
       },
     );
   }

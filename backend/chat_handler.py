@@ -1,16 +1,11 @@
 """
 Chat handler for deadline queries using LLM
+Supports Groq (cloud), Ollama (local), and regex fallback
 """
 
-import json
-from typing import List, Dict, Optional
+from typing import List, Dict
 from datetime import datetime
-
-try:
-    import ollama
-    OLLAMA_AVAILABLE = True
-except ImportError:
-    OLLAMA_AVAILABLE = False
+from llm_provider import get_llm_provider, check_all_providers
 
 def build_context_from_tasks(tasks: List) -> str:
     """Build context string from tasks for LLM"""
@@ -28,52 +23,32 @@ def build_context_from_tasks(tasks: List) -> str:
     
     return "Current deadlines:\n" + "\n".join(context_parts)
 
-def chat_with_deadlines(question: str, tasks: List, model: str = "llama3.2:1b") -> Dict:
-    """Chat interface to query deadlines"""
+def chat_with_deadlines(question: str, tasks: List) -> Dict:
+    """
+    Chat interface to query deadlines using best available LLM provider
     
-    if not OLLAMA_AVAILABLE:
-        return {
-            "answer": "Chat feature requires Ollama. Please install: pip install ollama",
-            "source": "error"
-        }
+    Returns answer with provider information
+    """
+    provider = get_llm_provider()
     
     try:
         # Build context
         context = build_context_from_tasks(tasks)
-        current_date = datetime.now().strftime("%Y-%m-%d")
         
-        # Create prompt
-        prompt = f"""You are a helpful assistant for deadline management. Today's date is {current_date}.
-
-{context}
-
-User question: {question}
-
-Provide a concise, helpful answer. If asking about deadlines this week/month, calculate from today's date.
-If there are no relevant deadlines, say so clearly.
-
-Answer:"""
-
-        response = ollama.generate(
-            model=model,
-            prompt=prompt,
-            options={
-                "temperature": 0.3,
-                "num_predict": 200,
-            }
-        )
+        # Get answer from provider
+        answer = provider.chat(question, context)
         
         return {
-            "answer": response['response'].strip(),
-            "source": "llm",
-            "model": model,
+            "answer": answer,
+            "provider": provider.name,
             "context_tasks": len(tasks)
         }
         
     except Exception as e:
         return {
             "answer": f"Error generating response: {str(e)}",
-            "source": "error"
+            "provider": "error",
+            "context_tasks": len(tasks)
         }
 
 def suggest_questions() -> List[str]:
@@ -86,6 +61,17 @@ def suggest_questions() -> List[str]:
         "Do I have any deadlines from Gmail?",
         "Summarize my upcoming tasks"
     ]
+
+def get_llm_status() -> Dict:
+    """Get status of all available LLM providers"""
+    provider = get_llm_provider()
+    all_providers = check_all_providers()
+    
+    return {
+        "active_provider": provider.name,
+        "available_providers": all_providers,
+        "suggested_questions": suggest_questions()
+    }
 
 if __name__ == "__main__":
     # Test the chat handler
@@ -103,6 +89,12 @@ if __name__ == "__main__":
         MockTask("Team meeting", "2024-01-17 10:00", "manual"),
     ]
     
+    # Check status
+    print("LLM Status:")
+    import json
+    print(json.dumps(get_llm_status(), indent=2))
+    
+    # Test questions
     test_questions = [
         "What deadlines do I have?",
         "What's due this week?",
@@ -112,4 +104,5 @@ if __name__ == "__main__":
     for question in test_questions:
         print(f"\nQ: {question}")
         response = chat_with_deadlines(question, test_tasks)
-        print(f"A: {response['answer']}")
+        print(f"A ({response['provider']}): {response['answer']}")
+

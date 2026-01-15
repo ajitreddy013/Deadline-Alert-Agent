@@ -227,14 +227,19 @@ def notify_due_soon(threshold_minutes: int = 60, db: Session = Depends(get_db)):
 @app.get("/auth/google/login")
 async def google_login():
     """Initial OAuth step: Redirect user to Google's consent screen."""
-    print(f"DEBUG: Starting login with Client ID: {GOOGLE_CLIENT_ID[:10]}...")
+    backend_url = os.environ.get("BACKEND_URL", "http://localhost:8000")
+    redirect_uri = f"{backend_url.rstrip('/')}/auth/google/callback"
+    
+    print(f"DEBUG: Starting login. Backend URL: {backend_url}")
+    print(f"DEBUG: Client ID: {GOOGLE_CLIENT_ID[:10] if GOOGLE_CLIENT_ID else 'MISSING'}...")
+    
     if not GOOGLE_CLIENT_ID:
-        raise HTTPException(status_code=500, detail="GOOGLE_CLIENT_ID not configured")
+        raise HTTPException(status_code=500, detail="GOOGLE_CLIENT_ID not configured in environment variables")
     
     # We use offline access to get a refresh token
     params = {
         "client_id": GOOGLE_CLIENT_ID,
-        "redirect_uri": "http://localhost:8000/auth/google/callback",
+        "redirect_uri": redirect_uri,
         "response_type": "code",
         "scope": "openid email profile https://www.googleapis.com/auth/gmail.readonly",
         "access_type": "offline",
@@ -246,6 +251,9 @@ async def google_login():
 @app.get("/auth/google/callback")
 async def google_callback(code: str, db: Session = Depends(get_db)):
     """Second OAuth step: Google redirects here with a code."""
+    backend_url = os.environ.get("BACKEND_URL", "http://localhost:8000")
+    redirect_uri = f"{backend_url.rstrip('/')}/auth/google/callback"
+    
     try:
         # 1. Prepare the flow to exchange the code
         flow = Flow.from_client_config(
@@ -259,7 +267,7 @@ async def google_callback(code: str, db: Session = Depends(get_db)):
             },
             # Match the scopes used in /login exactly
             scopes=["openid", "email", "profile", "https://www.googleapis.com/auth/gmail.readonly"],
-            redirect_uri="http://localhost:8000/auth/google/callback"
+            redirect_uri=redirect_uri
         )
         
         # 2. Exchange code for token

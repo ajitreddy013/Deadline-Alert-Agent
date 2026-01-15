@@ -88,3 +88,7 @@ backend/.env
 # Personal credentials backup
 backend/email_accounts_backup.json
 
+
+# Log files
+*.log
+backend.log

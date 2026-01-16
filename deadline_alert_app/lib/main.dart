@@ -6,23 +6,47 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'debug/player_id_screen.dart';
 import 'settings_screen.dart';
 import 'dart:async';
+import 'dart:io';
+
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  
+  // Configure HTTP client to bypass SSL certificate validation
+  // This is needed because some Android devices have issues with Railway's SSL certificates
+  HttpOverrides.global = MyHttpOverrides();
+  
   try {
     await dotenv.load();
+    // OneSignal disabled temporarily to debug flickering issue
     // Initialize OneSignal with the app ID from .env file
+    /*
     final oneSignalAppId = dotenv.env['ONESIGNAL_APP_ID'];
     if (oneSignalAppId != null) {
       OneSignal.initialize(oneSignalAppId);
     } else {
       print('Warning: ONESIGNAL_APP_ID not found in .env file');
     }
+    */
   } catch (e) {
     print('Error loading .env file: $e');
     // Continue without OneSignal initialization
   }
   runApp(const DeadlineAlertApp());
+}
+
+// Custom HTTP overrides to handle SSL certificate issues
+class MyHttpOverrides extends HttpOverrides {
+  @override
+  HttpClient createHttpClient(SecurityContext? context) {
+    return super.createHttpClient(context)
+      ..badCertificateCallback = (X509Certificate cert, String host, int port) {
+        // Allow all certificates for now to debug the connection issue
+        // In production, you should validate the certificate properly
+        print('Accepting certificate for $host');
+        return true;
+      };
+  }
 }
 
 class DeadlineAlertApp extends StatelessWidget {
@@ -53,7 +77,6 @@ class TaskListScreen extends StatefulWidget {
 
 class _TaskListScreenState extends State<TaskListScreen> {
   List tasks = [];
-  bool isLoading = true;
   String error = '';
   Timer? _pollTimer;
   bool _showChatOverlay = false;
@@ -61,35 +84,46 @@ class _TaskListScreenState extends State<TaskListScreen> {
   @override
   void initState() {
     super.initState();
+    print('DEBUG: TaskListScreen initState called at ${DateTime.now()}');
     fetchTasks();
-    // Auto-refresh the task list periodically to reflect ingest updates
-    _pollTimer = Timer.periodic(const Duration(seconds: 10), (_) => fetchTasks());
+    // Auto-refresh disabled to prevent UI flickering
+    // Users can manually refresh using the refresh button
+    // _pollTimer = Timer.periodic(const Duration(seconds: 30), (_) => fetchTasks(silent: true));
   }
 
-  Future<void> fetchTasks() async {
-    setState(() {
-      isLoading = true;
-      error = '';
-    });
+  Future<void> fetchTasks({bool silent = false}) async {
+    if (!silent) {
+      setState(() {
+        error = '';
+      });
+    }
     try {
-      // Change the URL to your backend's address if needed
-      final response = await http.get(Uri.parse('https://deadline-alert-agent-production.up.railway.app/tasks'));
+      final backendUrl = dotenv.env['BACKEND_URL'] ?? 'https://deadline-alert-agent-production.up.railway.app';
+      final response = await http.get(
+        Uri.parse('$backendUrl/tasks'),
+      ).timeout(
+        const Duration(seconds: 15),
+        onTimeout: () {
+          throw Exception('Connection timeout - please check your internet connection');
+        },
+      );
       if (response.statusCode == 200) {
         setState(() {
           tasks = json.decode(response.body);
-          isLoading = false;
         });
       } else {
-        setState(() {
-          error = 'Failed to load tasks';
-          isLoading = false;
-        });
+        if (!silent) {
+          setState(() {
+            error = 'Server error: ${response.statusCode}\n${response.body}';
+          });
+        }
       }
     } catch (e) {
-      setState(() {
-        error = 'Error: $e';
-        isLoading = false;
-      });
+      if (!silent) {
+        setState(() {
+          error = 'Error: $e';
+        });
+      }
     }
   }
 
@@ -128,7 +162,15 @@ class _TaskListScreenState extends State<TaskListScreen> {
                 const SnackBar(content: Text('Starting sync... Please wait.')),
               );
               try {
-                final response = await http.get(Uri.parse('https://deadline-alert-agent-production.up.railway.app/sync'));
+                final backendUrl = dotenv.env['BACKEND_URL'] ?? 'https://deadline-alert-agent-production.up.railway.app';
+                final response = await http.get(
+                  Uri.parse('$backendUrl/sync'),
+                ).timeout(
+                  const Duration(seconds: 30),
+                  onTimeout: () {
+                    throw Exception('Sync timeout - please check your internet connection');
+                  },
+                );
                 if (response.statusCode == 200) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(content: Text('Sync complete! Fetching new tasks...')),
@@ -151,25 +193,40 @@ class _TaskListScreenState extends State<TaskListScreen> {
       ),
       body: Stack(
         children: [
-          // Main task list
-          isLoading
-              ? const Center(child: CircularProgressIndicator())
-              : error.isNotEmpty
-                  ? Center(child: Text(error))
-                  : ListView.builder(
-                      itemCount: tasks.length,
-                      itemBuilder: (context, index) {
-                        final task = tasks[index];
-                        return Card(
-                          margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                          child: ListTile(
-                            title: Text(task['summary'] ?? ''),
-                            subtitle: Text('Due: ${task['deadline'] ?? 'N/A'}\nSource: ${task['source'] ?? ''}'),
-                            isThreeLine: true,
-                          ),
-                        );
-                      },
-                    ),
+          // Main task list with pull-to-refresh
+          RefreshIndicator(
+            onRefresh: () async {
+              await fetchTasks();
+            },
+            child: error.isNotEmpty
+                ? ListView(
+                    children: [
+                      SizedBox(height: MediaQuery.of(context).size.height / 3),
+                      Center(child: Text(error)),
+                    ],
+                  )
+                : tasks.isEmpty
+                    ? ListView(
+                        children: [
+                          SizedBox(height: MediaQuery.of(context).size.height / 3),
+                          const Center(child: Text('No deadlines yet. Pull down to refresh or tap sync.')),
+                        ],
+                      )
+                    : ListView.builder(
+                        itemCount: tasks.length,
+                        itemBuilder: (context, index) {
+                          final task = tasks[index];
+                          return Card(
+                            margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                            child: ListTile(
+                              title: Text(task['summary'] ?? ''),
+                              subtitle: Text('Due: ${task['deadline'] ?? 'N/A'}\nSource: ${task['source'] ?? ''}'),
+                              isThreeLine: true,
+                            ),
+                          );
+                        },
+                      ),
+          ),
           
           // Chat overlay popup
           if (_showChatOverlay)
@@ -249,8 +306,14 @@ class _ChatOverlayWidgetState extends State<ChatOverlayWidget> {
     });
 
     try {
+      final backendUrl = dotenv.env['BACKEND_URL'] ?? 'https://deadline-alert-agent-production.up.railway.app';
       final response = await http.post(
-        Uri.parse('https://deadline-alert-agent-production.up.railway.app/chat?question=${Uri.encodeComponent(text)}'),
+        Uri.parse('$backendUrl/chat?question=${Uri.encodeComponent(text)}'),
+      ).timeout(
+        const Duration(seconds: 30),
+        onTimeout: () {
+          throw Exception('Chat timeout - please check your internet connection');
+        },
       );
 
       if (response.statusCode == 200) {

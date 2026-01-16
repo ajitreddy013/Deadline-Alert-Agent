@@ -5,6 +5,7 @@ import 'dart:convert';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:url_launcher/url_launcher.dart';
+import 'dart:io';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -65,14 +66,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _sendCodeToBackend(GoogleSignInAccount user) async {
     print("DEBUG: Sending code to backend for ${user.email}...");
     try {
+      final backendUrl = dotenv.env['BACKEND_URL'] ?? 'https://deadline-alert-agent-production.up.railway.app';
       final response = await http.post(
-        Uri.parse('https://deadline-alert-agent-production.up.railway.app/auth/google/exchange'),
+        Uri.parse('$backendUrl/auth/google/exchange'),
         headers: {'Content-Type': 'application/json'},
         body: json.encode({
           'code': user.serverAuthCode,
           'email': user.email,
           'account_name': user.displayName ?? 'Personal',
         }),
+      ).timeout(
+        const Duration(seconds: 15),
+        onTimeout: () {
+          throw Exception('Connection timeout - please check your internet connection');
+        },
       );
       
       if (response.statusCode == 200) {
@@ -93,7 +100,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> fetchAccounts() async {
     setState(() => isLoading = true);
     try {
-      final response = await http.get(Uri.parse('https://deadline-alert-agent-production.up.railway.app/accounts'));
+      final backendUrl = dotenv.env['BACKEND_URL'] ?? 'https://deadline-alert-agent-production.up.railway.app';
+      final response = await http.get(
+        Uri.parse('$backendUrl/accounts'),
+      ).timeout(
+        const Duration(seconds: 15),
+        onTimeout: () {
+          throw Exception('Connection timeout - please check your internet connection');
+        },
+      );
       if (response.statusCode == 200) {
         setState(() {
           accounts = json.decode(response.body);
@@ -139,7 +154,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _deleteAccount(int id) async {
     try {
-      final response = await http.delete(Uri.parse('https://deadline-alert-agent-production.up.railway.app/accounts/$id'));
+      final backendUrl = dotenv.env['BACKEND_URL'] ?? 'https://deadline-alert-agent-production.up.railway.app';
+      final response = await http.delete(
+        Uri.parse('$backendUrl/accounts/$id'),
+      ).timeout(
+        const Duration(seconds: 10),
+        onTimeout: () {
+          throw Exception('Connection timeout - please check your internet connection');
+        },
+      );
       if (response.statusCode == 200) {
         fetchAccounts();
       }
@@ -209,7 +232,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   const SizedBox(height: 8),
                   ElevatedButton.icon(
                     onPressed: () async {
-                      final url = Uri.parse('https://deadline-alert-agent-production.up.railway.app/auth/google/login');
+                      final backendUrl = dotenv.env['BACKEND_URL'] ?? 'https://deadline-alert-agent-production.up.railway.app';
+                      final url = Uri.parse('$backendUrl/auth/google/login');
                       try {
                         await launchUrl(url, mode: LaunchMode.externalApplication);
                       } catch (e) {

@@ -102,7 +102,6 @@ class _TaskListScreenState extends State<TaskListScreen> {
   @override
   void initState() {
     super.initState();
-    print('DEBUG: TaskListScreen initState called at ${DateTime.now()}');
     fetchTasks();
     // Auto-refresh every 30 seconds for real-time WhatsApp updates
     _pollTimer = Timer.periodic(const Duration(seconds: 30), (_) => fetchTasks(silent: true));
@@ -220,10 +219,8 @@ class _TaskListScreenState extends State<TaskListScreen> {
         },
       );
       if (response.statusCode == 200) {
-        final List loadedTasks = json.decode(response.body);
-        print('DEBUG: Loaded ${loadedTasks.length} tasks from backend');
         setState(() {
-          tasks = loadedTasks;
+          tasks = json.decode(response.body);
         });
       } else {
         if (!silent) {
@@ -308,14 +305,9 @@ class _TaskListScreenState extends State<TaskListScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final sorted = getSortedTasks();
-    print('DEBUG: Building with ${sorted.length} sorted tasks.');
-    for (var i = 0; i < sorted.length; i++) {
-        print('DEBUG: [Task $i] ${sorted[i]['summary']} - Status: ${sorted[i]['alert_status']}');
-    }
     return Scaffold(
       appBar: AppBar(
-        title: Text('DeadlineAI (${getFilteredTasks().length} tasks)'),
+        title: const Text('DeadlineAI'),
         actions: [
           // Show/hide completed toggle
 

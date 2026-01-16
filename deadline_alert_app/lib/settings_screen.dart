@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'main.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
@@ -66,7 +67,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _sendCodeToBackend(GoogleSignInAccount user) async {
     print("DEBUG: Sending code to backend for ${user.email}...");
     try {
-      final backendUrl = dotenv.env['BACKEND_URL'] ?? 'https://deadline-alert-agent-production.up.railway.app';
+      final backendUrl = dotenv.env['BACKEND_URL'] ?? 'http://localhost:8000';
       final response = await http.post(
         Uri.parse('$backendUrl/auth/google/exchange'),
         headers: {'Content-Type': 'application/json'},
@@ -100,7 +101,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> fetchAccounts() async {
     setState(() => isLoading = true);
     try {
-      final backendUrl = dotenv.env['BACKEND_URL'] ?? 'https://deadline-alert-agent-production.up.railway.app';
+      final backendUrl = dotenv.env['BACKEND_URL'] ?? 'http://localhost:8000';
       final response = await http.get(
         Uri.parse('$backendUrl/accounts'),
       ).timeout(
@@ -154,7 +155,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _deleteAccount(int id) async {
     try {
-      final backendUrl = dotenv.env['BACKEND_URL'] ?? 'https://deadline-alert-agent-production.up.railway.app';
+      final backendUrl = dotenv.env['BACKEND_URL'] ?? 'http://localhost:8000';
       final response = await http.delete(
         Uri.parse('$backendUrl/accounts/$id'),
       ).timeout(
@@ -182,6 +183,41 @@ class _SettingsScreenState extends State<SettingsScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            const Text(
+              'Appearance',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 10),
+            ValueListenableBuilder<ThemeMode>(
+              valueListenable: themeNotifier,
+              builder: (context, currentMode, _) {
+                return Card(
+                  child: Column(
+                    children: [
+                      RadioListTile<ThemeMode>(
+                        title: const Text('🌟 System Default'),
+                        value: ThemeMode.system,
+                        groupValue: currentMode,
+                        onChanged: (mode) => themeNotifier.value = mode!,
+                      ),
+                      RadioListTile<ThemeMode>(
+                        title: const Text('☀️ Light Mode'),
+                        value: ThemeMode.light,
+                        groupValue: currentMode,
+                        onChanged: (mode) => themeNotifier.value = mode!,
+                      ),
+                      RadioListTile<ThemeMode>(
+                        title: const Text('🌙 Dark Mode'),
+                        value: ThemeMode.dark,
+                        groupValue: currentMode,
+                        onChanged: (mode) => themeNotifier.value = mode!,
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+            const SizedBox(height: 24),
             const Text(
               'Connected Accounts',
               style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
@@ -232,7 +268,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   const SizedBox(height: 8),
                   ElevatedButton.icon(
                     onPressed: () async {
-                      final backendUrl = dotenv.env['BACKEND_URL'] ?? 'https://deadline-alert-agent-production.up.railway.app';
+                      final backendUrl = dotenv.env['BACKEND_URL'] ?? 'http://localhost:8000';
                       final url = Uri.parse('$backendUrl/auth/google/login');
                       try {
                         await launchUrl(url, mode: LaunchMode.externalApplication);

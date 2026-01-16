@@ -49,20 +49,36 @@ class MyHttpOverrides extends HttpOverrides {
   }
 }
 
+// Global notifier for theme mode so it can be accessed from settings screen
+final ValueNotifier<ThemeMode> themeNotifier = ValueNotifier(ThemeMode.system);
+
 class DeadlineAlertApp extends StatelessWidget {
   const DeadlineAlertApp({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'DeadlineAI',
-      theme: ThemeData(
-        primarySwatch: Colors.blue,
-      ),
-      home: const TaskListScreen(),
-      routes: {
-        '/debug/player-id': (context) => const PlayerIdScreen(),
-        '/settings': (context) => const SettingsScreen(),
+    return ValueListenableBuilder<ThemeMode>(
+      valueListenable: themeNotifier,
+      builder: (context, currentMode, _) {
+        return MaterialApp(
+          title: 'DeadlineAI',
+          theme: ThemeData(
+            primarySwatch: Colors.blue,
+            brightness: Brightness.light,
+            useMaterial3: true,
+          ),
+          darkTheme: ThemeData(
+            primarySwatch: Colors.blue,
+            brightness: Brightness.dark,
+            useMaterial3: true,
+          ),
+          themeMode: currentMode,
+          home: const TaskListScreen(),
+          routes: {
+            '/debug/player-id': (context) => const PlayerIdScreen(),
+            '/settings': (context) => const SettingsScreen(),
+          },
+        );
       },
     );
   }
@@ -80,15 +96,111 @@ class _TaskListScreenState extends State<TaskListScreen> {
   String error = '';
   Timer? _pollTimer;
   bool _showChatOverlay = false;
+  String _sourceFilter = 'All'; // Filter: All, Gmail, WhatsApp, Manual
+  bool _showCompleted = false; // Show/hide completed tasks
 
   @override
   void initState() {
     super.initState();
     print('DEBUG: TaskListScreen initState called at ${DateTime.now()}');
     fetchTasks();
-    // Auto-refresh disabled to prevent UI flickering
-    // Users can manually refresh using the refresh button
-    // _pollTimer = Timer.periodic(const Duration(seconds: 30), (_) => fetchTasks(silent: true));
+    // Auto-refresh every 30 seconds for real-time WhatsApp updates
+    _pollTimer = Timer.periodic(const Duration(seconds: 30), (_) => fetchTasks(silent: true));
+  }
+
+  // Get relative time string for deadline
+  String getRelativeTime(String? deadline) {
+    if (deadline == null || deadline.isEmpty) return 'No deadline';
+    
+    try {
+      final due = DateTime.parse(deadline);
+      final now = DateTime.now();
+      final diff = due.difference(now);
+      
+      if (diff.isNegative) {
+        final absDiff = diff.abs();
+        if (absDiff.inDays > 0) return '❌ Overdue by ${absDiff.inDays} day${absDiff.inDays > 1 ? 's' : ''}';
+        if (absDiff.inHours > 0) return '❌ Overdue by ${absDiff.inHours} hour${absDiff.inHours > 1 ? 's' : ''}';
+        return '❌ Overdue by ${absDiff.inMinutes} min${absDiff.inMinutes > 1 ? 's' : ''}';
+      }
+      
+      if (diff.inMinutes < 60) return '🔴 Due in ${diff.inMinutes} min${diff.inMinutes > 1 ? 's' : ''}';
+      if (diff.inHours < 24) return '🟡 Due in ${diff.inHours} hour${diff.inHours > 1 ? 's' : ''}';
+      if (diff.inDays < 7) return '🟢 Due in ${diff.inDays} day${diff.inDays > 1 ? 's' : ''}';
+      if (diff.inDays < 30) return '🟢 Due in ${(diff.inDays / 7).floor()} week${(diff.inDays / 7).floor() > 1 ? 's' : ''}';
+      return '🟢 Due in ${(diff.inDays / 30).floor()} month${(diff.inDays / 30).floor() > 1 ? 's' : ''}';
+    } catch (e) {
+      return deadline;
+    }
+  }
+
+  // Get urgency color for task
+  Color getUrgencyColor(String? deadline) {
+    if (deadline == null || deadline.isEmpty) return Colors.grey;
+    
+    try {
+      final due = DateTime.parse(deadline);
+      final now = DateTime.now();
+      final diff = due.difference(now);
+      
+      if (diff.isNegative) return Colors.red.shade700; // Overdue
+      if (diff.inHours < 1) return Colors.red; // Less than 1 hour
+      if (diff.inHours < 24) return Colors.orange; // Less than 1 day
+      if (diff.inDays < 3) return Colors.yellow.shade700; // Less than 3 days
+      return Colors.green; // More than 3 days
+    } catch (e) {
+      return Colors.grey;
+    }
+  }
+
+  // Get source icon
+  IconData getSourceIcon(String source) {
+    if (source.toLowerCase().contains('gmail')) return Icons.email;
+    if (source.toLowerCase().contains('whatsapp')) return Icons.chat;
+    return Icons.edit;
+  }
+
+  // Filter tasks by source and completion status
+  List getFilteredTasks() {
+    var filtered = tasks.where((task) {
+      // Filter by source
+      if (_sourceFilter == 'All') return true;
+      final source = (task['source'] ?? '').toString().toLowerCase();
+      if (_sourceFilter == 'Gmail') return source.contains('gmail');
+      if (_sourceFilter == 'WhatsApp') return source.contains('whatsapp');
+      if (_sourceFilter == 'Manual') return !source.contains('gmail') && !source.contains('whatsapp');
+      return true;
+    }).toList();
+    return filtered;
+  }
+
+  List getSortedTasks() {
+    final filtered = getFilteredTasks();
+    filtered.sort((a, b) {
+      final isCompletedA = a['alert_status'] == 'completed';
+      final isCompletedB = b['alert_status'] == 'completed';
+      
+      // First sort: Put completed ones at the bottom
+      if (isCompletedA != isCompletedB) {
+        return isCompletedA ? 1 : -1;
+      }
+      
+      // Second sort: Sort the two groups by deadline
+      final deadlineA = a['deadline'];
+      final deadlineB = b['deadline'];
+      
+      if (deadlineA == null || deadlineA.isEmpty) return 1;
+      if (deadlineB == null || deadlineB.isEmpty) return -1;
+      
+      try {
+        final dateA = DateTime.parse(deadlineA);
+        final dateB = DateTime.parse(deadlineB);
+        return dateA.compareTo(dateB);
+      } catch (e) {
+        return 0;
+      }
+    });
+    return filtered;
   }
 
   Future<void> fetchTasks({bool silent = false}) async {
@@ -98,7 +210,7 @@ class _TaskListScreenState extends State<TaskListScreen> {
       });
     }
     try {
-      final backendUrl = dotenv.env['BACKEND_URL'] ?? 'https://deadline-alert-agent-production.up.railway.app';
+      final backendUrl = dotenv.env['BACKEND_URL'] ?? 'http://localhost:8000';
       final response = await http.get(
         Uri.parse('$backendUrl/tasks'),
       ).timeout(
@@ -108,8 +220,10 @@ class _TaskListScreenState extends State<TaskListScreen> {
         },
       );
       if (response.statusCode == 200) {
+        final List loadedTasks = json.decode(response.body);
+        print('DEBUG: Loaded ${loadedTasks.length} tasks from backend');
         setState(() {
-          tasks = json.decode(response.body);
+          tasks = loadedTasks;
         });
       } else {
         if (!silent) {
@@ -127,6 +241,64 @@ class _TaskListScreenState extends State<TaskListScreen> {
     }
   }
 
+  Future<void> _markTaskComplete(int taskId) async {
+    try {
+      final backendUrl = dotenv.env['BACKEND_URL'] ?? 'http://localhost:8000';
+      final response = await http.patch(
+        Uri.parse('$backendUrl/tasks/$taskId/complete'),
+      ).timeout(
+        const Duration(seconds: 10),
+        onTimeout: () {
+          throw Exception('Connection timeout');
+        },
+      );
+      
+      if (response.statusCode == 200) {
+        fetchTasks(silent: true);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('✅ Task marked as complete'), duration: Duration(seconds: 1)),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _deleteTask(int taskId) async {
+    try {
+      final backendUrl = dotenv.env['BACKEND_URL'] ?? 'http://localhost:8000';
+      final response = await http.delete(
+        Uri.parse('$backendUrl/tasks/$taskId'),
+      ).timeout(
+        const Duration(seconds: 10),
+        onTimeout: () {
+          throw Exception('Connection timeout');
+        },
+      );
+      
+      if (response.statusCode == 200) {
+        fetchTasks(silent: true);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('🗑️ Task deleted'), duration: Duration(seconds: 1)),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e')),
+        );
+      }
+    }
+  }
+
 
   @override
   void dispose() {
@@ -136,10 +308,29 @@ class _TaskListScreenState extends State<TaskListScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final sorted = getSortedTasks();
+    print('DEBUG: Building with ${sorted.length} sorted tasks.');
+    for (var i = 0; i < sorted.length; i++) {
+        print('DEBUG: [Task $i] ${sorted[i]['summary']} - Status: ${sorted[i]['alert_status']}');
+    }
     return Scaffold(
       appBar: AppBar(
-        title: const Text('DeadlineAI'),
+        title: Text('DeadlineAI (${getFilteredTasks().length} tasks)'),
         actions: [
+          // Show/hide completed toggle
+
+          // Source filter dropdown
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.filter_list),
+            tooltip: 'Filter by source',
+            onSelected: (value) => setState(() => _sourceFilter = value),
+            itemBuilder: (context) => [
+              const PopupMenuItem(value: 'All', child: Text('📋 All Sources')),
+              const PopupMenuItem(value: 'Gmail', child: Text('📧 Gmail')),
+              const PopupMenuItem(value: 'WhatsApp', child: Text('💬 WhatsApp')),
+              const PopupMenuItem(value: 'Manual', child: Text('✍️ Manual')),
+            ],
+          ),
           IconButton(
             icon: const Icon(Icons.settings),
             onPressed: () => Navigator.of(context).pushNamed('/settings'),
@@ -162,7 +353,7 @@ class _TaskListScreenState extends State<TaskListScreen> {
                 const SnackBar(content: Text('Starting sync... Please wait.')),
               );
               try {
-                final backendUrl = dotenv.env['BACKEND_URL'] ?? 'https://deadline-alert-agent-production.up.railway.app';
+                final backendUrl = dotenv.env['BACKEND_URL'] ?? 'http://localhost:8000';
                 final response = await http.get(
                   Uri.parse('$backendUrl/sync'),
                 ).timeout(
@@ -212,18 +403,136 @@ class _TaskListScreenState extends State<TaskListScreen> {
                           const Center(child: Text('No deadlines yet. Pull down to refresh or tap sync.')),
                         ],
                       )
-                    : ListView.builder(
-                        itemCount: tasks.length,
+                     : ListView.builder(
+                        padding: const EdgeInsets.only(bottom: 200), // Add padding so last items aren't hidden by chat overlay
+                        itemCount: getSortedTasks().length,
                         itemBuilder: (context, index) {
-                          final task = tasks[index];
-                          return Card(
-                            margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                            child: ListTile(
-                              title: Text(task['summary'] ?? ''),
-                              subtitle: Text('Due: ${task['deadline'] ?? 'N/A'}\nSource: ${task['source'] ?? ''}'),
-                              isThreeLine: true,
+                          final sortedTasks = getSortedTasks();
+                          final task = sortedTasks[index];
+                          final deadline = task['deadline'];
+                          final source = task['source'] ?? '';
+                          final isCompleted = task['alert_status'] == 'completed';
+                          
+                          // Check if this is the first completed task to show a separator
+                          bool showHeader = false;
+                          if (isCompleted && index > 0) {
+                            final previousItemIsCompleted = sortedTasks[index - 1]['alert_status'] == 'completed';
+                            if (!previousItemIsCompleted) {
+                              showHeader = true;
+                            }
+                          } else if (isCompleted && index == 0) {
+                            showHeader = true; // All tasks are completed
+                          }
+
+                          Widget taskContent = Dismissible(
+                            key: Key(task['id'].toString()),
+                            background: Container(
+                              color: Colors.red,
+                              alignment: Alignment.centerRight,
+                              padding: const EdgeInsets.only(right: 20),
+                              child: const Icon(Icons.delete, color: Colors.white),
+                            ),
+                            direction: DismissDirection.endToStart,
+                            onDismissed: (direction) async {
+                              await _deleteTask(task['id']);
+                            },
+                            child: Opacity(
+                              opacity: isCompleted ? 0.75 : 1.0,
+                              child: Card(
+                                margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                elevation: isCompleted ? 1 : 3,
+                                color: isCompleted ? (Theme.of(context).brightness == Brightness.dark ? Colors.grey[900]?.withOpacity(0.5) : Colors.grey[100]) : null,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                  side: BorderSide(
+                                    color: isCompleted ? Colors.grey.withOpacity(0.3) : getUrgencyColor(deadline),
+                                    width: 2,
+                                  ),
+                                ),
+                                child: ListTile(
+                                  leading: Checkbox(
+                                    value: isCompleted,
+                                    onChanged: (bool? value) async {
+                                      if (value == true) {
+                                        await _markTaskComplete(task['id']);
+                                      } else {
+                                        // Optional: Allow unsetting if backend supports it
+                                      }
+                                    },
+                                    shape: const CircleBorder(),
+                                  ),
+                                  title: Text(
+                                    task['summary'] ?? '',
+                                    style: TextStyle(
+                                      fontWeight: isCompleted ? FontWeight.normal : FontWeight.bold,
+                                      fontSize: 16,
+                                      decoration: isCompleted ? TextDecoration.lineThrough : null,
+                                      color: isCompleted ? Colors.grey[600] : null,
+                                    ),
+                                  ),
+                                  subtitle: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      const SizedBox(height: 4),
+                                      Row(
+                                        children: [
+                                          Icon(
+                                            getSourceIcon(source),
+                                            size: 16,
+                                            color: isCompleted ? Colors.grey : getUrgencyColor(deadline),
+                                          ),
+                                          const SizedBox(width: 4),
+                                          Text(
+                                            getRelativeTime(deadline),
+                                            style: TextStyle(
+                                              color: isCompleted ? Colors.grey : getUrgencyColor(deadline),
+                                              fontWeight: isCompleted ? FontWeight.normal : FontWeight.w600,
+                                              fontSize: 14,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ],
+                                  ),
+                                  isThreeLine: false,
+                                  trailing: IconButton(
+                                    icon: const Icon(Icons.delete_outline, color: Colors.red),
+                                    onPressed: () async {
+                                       await _deleteTask(task['id']);
+                                    },
+                                  ),
+                                ),
+                              ),
                             ),
                           );
+
+                          if (showHeader) {
+                            return Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Padding(
+                                  padding: EdgeInsets.fromLTRB(16, 20, 16, 8),
+                                  child: Row(
+                                    children: [
+                                      Icon(Icons.check_circle_outline, size: 20, color: Colors.grey),
+                                      SizedBox(width: 8),
+                                      Text(
+                                        'COMPLETED TASKS',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.grey,
+                                          letterSpacing: 1.2,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                taskContent,
+                              ],
+                            );
+                          }
+                          return taskContent;
                         },
                       ),
           ),
@@ -306,7 +615,7 @@ class _ChatOverlayWidgetState extends State<ChatOverlayWidget> {
     });
 
     try {
-      final backendUrl = dotenv.env['BACKEND_URL'] ?? 'https://deadline-alert-agent-production.up.railway.app';
+      final backendUrl = dotenv.env['BACKEND_URL'] ?? 'http://127.0.0.1:8000';
       final response = await http.post(
         Uri.parse('$backendUrl/chat?question=${Uri.encodeComponent(text)}'),
       ).timeout(

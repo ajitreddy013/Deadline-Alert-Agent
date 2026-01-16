@@ -86,19 +86,8 @@ app = FastAPI(lifespan=lifespan)
 # Enable CORS for local development (Flutter web in Chrome)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost",
-        "http://127.0.0.1",
-        "http://localhost:7357",
-        "http://127.0.0.1:7357",
-        "http://localhost:8080",
-        "http://127.0.0.1:8080",
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "http://localhost:5000",
-        "http://127.0.0.1:5000",
-    ],
-    allow_credentials=False,
+    allow_origins=["*"],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -143,6 +132,8 @@ class TaskCreate(BaseModel):
     deadline: str = None  # ISO format string or natural language
     source: str
     alert_status: str = "pending"
+    whatsapp_sender: Optional[str] = None
+    whatsapp_chat: Optional[str] = None
 
 class TaskRead(BaseModel):
     id: int
@@ -150,6 +141,9 @@ class TaskRead(BaseModel):
     deadline: str = None
     source: str
     alert_status: str
+    created_at: Optional[datetime] = None
+    whatsapp_sender: Optional[str] = None
+    whatsapp_chat: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -170,6 +164,29 @@ def create_task(task: TaskCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(db_task)
     return db_task
+
+@app.patch("/tasks/{task_id}/complete")
+def mark_task_complete(task_id: int, db: Session = Depends(get_db)):
+    """Mark a task as complete"""
+    task = db.query(Task).filter(Task.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    task.alert_status = "completed"
+    db.commit()
+    db.refresh(task)
+    return {"status": "success", "task": task}
+
+@app.delete("/tasks/{task_id}")
+def delete_task(task_id: int, db: Session = Depends(get_db)):
+    """Delete a task"""
+    task = db.query(Task).filter(Task.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    db.delete(task)
+    db.commit()
+    return {"status": "deleted", "task_id": task_id}
 
 @app.post("/extract_deadline")
 def extract_deadline(message: str = Body(..., embed=True)):

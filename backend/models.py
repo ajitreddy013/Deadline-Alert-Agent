@@ -1,5 +1,6 @@
 from sqlalchemy import Column, Integer, String, DateTime, Boolean
 from sqlalchemy.ext.declarative import declarative_base
+from datetime import datetime
 
 Base = declarative_base()
 
@@ -8,8 +9,11 @@ class Task(Base):
     id = Column(Integer, primary_key=True, index=True)
     summary = Column(String, nullable=False)
     deadline = Column(String, nullable=True)
-    source = Column(String, nullable=False)  # e.g., 'gmail', 'whatsapp'
+    source = Column(String, nullable=False)  # e.g., 'gmail', 'whatsapp', 'WhatsApp - Chat Name'
     alert_status = Column(String, default="pending")  # 'sent' or 'pending'
+    created_at = Column(DateTime, default=datetime.utcnow)  # When task was created
+    whatsapp_sender = Column(String, nullable=True)  # WhatsApp sender name (if from WhatsApp)
+    whatsapp_chat = Column(String, nullable=True)  # WhatsApp chat name (if from WhatsApp)
     
 class UserPreferences(Base):
     __tablename__ = "user_preferences"
